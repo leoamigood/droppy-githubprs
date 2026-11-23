@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "droppykit": {
+      "command": "/Users/leo/dev/droppykit/Scripts/droppykit",
+      "args": [
+        "mcp",
+        "--package",
+        "/Users/leo/dev/droppy/githubprs"
+      ]
+    }
+  }
+}

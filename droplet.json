@@ -1,0 +1,48 @@
+{
+  "id": "githubprs",
+  "name": "GitHub PRs",
+  "version": "1.0.0",
+  "summary": "Pull requests waiting on your review or action",
+  "description": "Lists the open GitHub pull requests that need you: reviews requested from you or your teams, and your own pull requests with changes requested, failing checks, merge conflicts, or an approval waiting for you to merge.\n\nLimit it to the organizations and repositories you care about, optionally show every open pull request in them, and get a notch alert when a new one appears.\n\nAdd a personal access token in the droplet's settings. It is kept in your Keychain.",
+  "category": "Productivity",
+  "kit": {
+    "abi": 1,
+    "minAPI": "1.16.0"
+  },
+  "minAppVersion": "15.3.0",
+  "capabilities": [
+    "network-client",
+    "hud",
+    "global-shortcuts",
+    "shelf-read",
+    "shelf-write"
+  ],
+  "surfaces": [
+    "shelf-widget",
+    "settings-pane",
+    "hud"
+  ],
+  "icon": "Githubprs.icon",
+  "creator": {
+    "name": "Leo Amigood",
+    "kind": "community",
+    "url": "https://github.com/leoamigood/droppy-githubprs",
+    "avatar": "Creator.png",
+    "gitlab": "leoamigood"
+  },
+  "source": {
+    "repository": "https://gitlab.com/droppyformac1/droplets/-/tree/main/droplets/githubprs",
+    "license": "MIT"
+  },
+  "screenshots": [
+    "Screenshot-Widget.png",
+    "Screenshot-Alert.png",
+    "Screenshot-Settings.png"
+  ],
+  "keywords": [
+    "github",
+    "pull requests",
+    "code review",
+    "pr"
+  ]
+}
