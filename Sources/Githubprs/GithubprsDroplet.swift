@@ -37,14 +37,40 @@ public final class GithubprsDroplet: NSObject, ObservableObject, Droplet {
     @Published public private(set) var lastUpdated: Date?
     @Published public private(set) var hasToken = false
 
+    /// What a harness hands the droplet in place of a Keychain token. Droppy
+    /// always creates the droplet with `.none`, through the principal class.
+    public enum Seed: Sendable {
+        case none
+        /// Fixed rows instead of a fetch, and one alert on activation: the
+        /// Store screenshots.
+        case items([AttentionPR])
+        /// A token to fetch with when the Keychain has none.
+        case token(String)
+    }
+
+    private let seed: Seed
     private var host: DropletHost?
     private var ticker: AnyCancellable?
     private var preferenceChanges: AnyCancellable?
     private var fetchTask: Task<Void, Never>?
 
+    public override convenience init() {
+        self.init(seed: .none)
+    }
+
+    public init(seed: Seed) {
+        self.seed = seed
+        super.init()
+    }
+
+    private var seededItems: [AttentionPR]? {
+        if case .items(let items) = seed { return items }
+        return nil
+    }
+
     public func activate(host: DropletHost) throws {
         self.host = host
-        hasToken = token != nil || isDemo
+        hasToken = token != nil || seededItems != nil
         status = hasToken ? .loading : .needsToken
         preferenceChanges = host.preferences.didChange
             .receive(on: RunLoop.main)
@@ -56,14 +82,7 @@ public final class GithubprsDroplet: NSObject, ObservableObject, Droplet {
         scheduleTicker()
         registerShortcut(on: host)
         refresh()
-        if isDemo { presentAlert(for: [Self.sampleItems[0]]) }
-    }
-
-    /// Harness only: `GITHUBPRS_DEMO=1 droppykit run` fills every surface
-    /// with the sample rows, for the Store screenshots. Never true in Droppy.
-    private var isDemo: Bool {
-        host?.environment.isHarness == true
-            && ProcessInfo.processInfo.environment["GITHUBPRS_DEMO"] == "1"
+        if let first = seededItems?.first { presentAlert(for: [first]) }
     }
 
     // MARK: - Shortcut
@@ -113,14 +132,10 @@ public final class GithubprsDroplet: NSObject, ObservableObject, Droplet {
 
     // MARK: - Token
 
-    /// The Keychain token, or in the harness `GITHUB_TOKEN` from the
-    /// environment so `droppykit run` can show real data without setup.
+    /// The Keychain token, or the one a harness seeded.
     private var token: String? {
         if let stored = TokenStore.read() { return stored }
-        if host?.environment.isHarness == true,
-           let env = ProcessInfo.processInfo.environment["GITHUB_TOKEN"], !env.isEmpty {
-            return env
-        }
+        if case .token(let seeded) = seed, !seeded.isEmpty { return seeded }
         return nil
     }
 
@@ -151,8 +166,8 @@ public final class GithubprsDroplet: NSObject, ObservableObject, Droplet {
 
     public func refresh() {
         guard let host else { return }
-        if isDemo {
-            items = Self.sampleItems
+        if let seededItems {
+            items = seededItems
             lastUpdated = Date()
             status = .loaded
             return
@@ -368,8 +383,9 @@ public final class GithubprsDroplet: NSObject, ObservableObject, Droplet {
 
     // MARK: - Widget-facing
 
-    /// Stand-in rows for the shelf's widget gallery preview.
-    static let sampleItems: [AttentionPR] = [
+    /// Stand-in rows for the shelf's widget gallery preview, and what the
+    /// harness seeds for the Store screenshots.
+    public static let sampleItems: [AttentionPR] = [
         .init(id: "1", number: 482, title: "Add retry budget to the sync worker", url: URL(string: "https://github.com")!,
               repository: "acme/api", author: "mara", updatedAt: Date().addingTimeInterval(-1_800), reason: .reviewRequested),
         .init(id: "2", number: 77, title: "Migrate settings to the new store", url: URL(string: "https://github.com")!,
@@ -387,7 +403,7 @@ public final class GithubprsDroplet: NSObject, ObservableObject, Droplet {
 
 // MARK: - Shelf widget
 
-extension GithubprsDroplet: ShelfWidgetProviding {
+extension GithubprsDroplet: ShelfWidgetCompositionProviding {
     /// Rows that fit without scrolling; past this the list scrolls and ends
     /// with a link to the same search on GitHub.
     static let soloRows = 5
@@ -399,18 +415,20 @@ extension GithubprsDroplet: ShelfWidgetProviding {
                 title: "GitHub PRs",
                 systemImage: "arrow.triangle.pull",
                 layoutTraits: ShelfWidgetLayoutTraits(
-                    preferredSoloWidth: 420,
-                    preferredPairedWidth: 210,
-                    // Header 20 + 8, then five 22pt rows 4 apart, plus the
-                    // notch's 8pt insets: 170.
-                    contentHeight: .fixed(170)
+                    // Header 34 + 10, then five 22pt rows 4 apart: 170.
+                    single: ShelfWidgetModeSize(width: 420, contentHeight: 170),
+                    // Header 28 + 8, three 20pt reason rows 4 apart, then
+                    // the latest title on up to two lines: 150.
+                    split: ShelfWidgetModeSize(width: 210, contentHeight: 150),
+                    // ShelfWidgetScaffold draws ShelfWidgetHeader at the top.
+                    header: .standard
                 )
             )
         ]
     }
 
-    public func makeWidgetView(_ id: ShelfWidgetID, context: ShelfWidgetContext) -> AnyView {
-        AnyView(GithubprsWidget(droplet: self, context: context))
+    public func makeWidgetContent(_ id: ShelfWidgetID, layout: ShelfWidgetLayout) -> AnyView {
+        AnyView(GithubprsWidget(droplet: self, layout: layout))
     }
 
     public func makeWidgetSettingsPopover(_ id: ShelfWidgetID) -> AnyView? { nil }
@@ -444,10 +462,12 @@ extension AttentionReason {
 
 private struct GithubprsWidget: View {
     @ObservedObject var droplet: GithubprsDroplet
-    let context: ShelfWidgetContext
+    let layout: ShelfWidgetLayout
+
+    private var showsSamples: Bool { layout.isPreview && droplet.items.isEmpty }
 
     private var items: [AttentionPR] {
-        context.isPreview && droplet.items.isEmpty ? GithubprsDroplet.sampleItems : droplet.items
+        showsSamples ? GithubprsDroplet.sampleItems : droplet.items
     }
 
     /// Which filter is on, so a scoped list never reads as all of GitHub.
@@ -460,91 +480,101 @@ private struct GithubprsWidget: View {
     /// The header counts what asks something of you, not every open PR.
     private var needsYouCount: Int { items.filter(\.reason.needsYou).count }
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: DroppySpacing.sm) {
-            header
-            content
+    /// The header's title is the widget's state, never its name: how many
+    /// pull requests wait on you, and alone on an unwrapped shelf the filter
+    /// they come from. Beside the camera it stays short enough for the band.
+    private var headerTitle: String {
+        let state: String
+        switch (showsSamples ? .loaded : droplet.status) {
+        case .needsToken:
+            state = "No token"
+        case .loading where items.isEmpty:
+            state = "Loading"
+        case .failed where items.isEmpty:
+            state = "Refresh failed"
+        default:
+            state = needsYouCount == 0 ? "All clear" : "\(needsYouCount) waiting"
         }
-        .padding(context.contentInsets)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        guard layout.isSingle, layout.notchWrap == nil, let scope = scopeSummary else { return state }
+        return "\(state) · \(scope)"
     }
 
-    private var header: some View {
-        HStack(spacing: DroppySpacing.xsm) {
-            Image(systemName: "arrow.triangle.pull")
-                .font(.system(size: 12, weight: .medium))
-            Text(context.isPaired ? "PRs" : "Pull requests")
-                .font(.system(size: 12, weight: .semibold))
-            if !context.isPaired, let scope = scopeSummary {
-                Text(scope)
-                    .font(.system(size: 11))
-                    .foregroundStyle(AdaptiveColors.notchSurfaceTertiaryText)
-                    .lineLimit(1)
-            }
-            if needsYouCount > 0 {
-                Text("\(needsYouCount)")
-                    .font(.system(size: 12, weight: .semibold))
-                    .monospacedDigit()
-                    .foregroundStyle(AdaptiveColors.notchSurfaceTertiaryText)
-            }
-            Spacer(minLength: 0)
-            // The list is still shown after a failed refresh; this says it is stale.
-            if case .failed(let error) = droplet.status, !items.isEmpty {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.orange)
-                    .help(error)
-                    .accessibilityLabel("Refresh failed: \(error)")
-                    .transition(DroppyTransition.element)
-            }
-            if droplet.hasToken {
-                Button {
-                    droplet.refresh()
-                } label: {
-                    Image(systemName: "arrow.clockwise")
-                }
-                .buttonStyle(DroppyCircleButtonStyle(size: 20))
-                .help("Refresh")
-                .accessibilityLabel("Refresh")
-            }
+    var body: some View {
+        DropletWidgetComposition {
+            scaffold { soloList }
+        } split: {
+            scaffold { pairedSummary }
         }
-        .foregroundStyle(AdaptiveColors.notchSurfaceSecondaryText)
+    }
+
+    private func scaffold<List: View>(@ViewBuilder list: () -> List) -> some View {
+        let list = list()
+        return ShelfWidgetScaffold(headerTitle, systemImage: "arrow.triangle.pull") {
+            headerControls
+        } content: {
+            content(list)
+        }
     }
 
     @ViewBuilder
-    private var content: some View {
-        if context.isPreview && droplet.items.isEmpty {
+    private var headerControls: some View {
+        // The list is still shown after a failed refresh; this says it is stale.
+        if case .failed(let error) = droplet.status, !items.isEmpty {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.orange)
+                .help(error)
+                .accessibilityLabel("Refresh failed: \(error)")
+                .transition(DroppyTransition.element)
+        }
+        if droplet.hasToken {
+            Button {
+                droplet.refresh()
+            } label: {
+                Image(systemName: "arrow.clockwise")
+            }
+            .buttonStyle(DroppyWashCircleButtonStyle(
+                diameter: layout.metrics.headerControlSize,
+                usesAdaptiveForegrounds: layout.usesAdaptiveForegrounds
+            ))
+            .help("Refresh")
+            .accessibilityLabel("Refresh")
+        }
+    }
+
+    private func pill(_ tone: DroppyWashTone = .neutral, height: CGFloat? = nil) -> DroppyWashPillButtonStyle {
+        DroppyWashPillButtonStyle(
+            height: height ?? layout.metrics.controlSize,
+            tone: tone,
+            usesAdaptiveForegrounds: layout.usesAdaptiveForegrounds
+        )
+    }
+
+    @ViewBuilder
+    private func content<List: View>(_ list: List) -> some View {
+        if showsSamples {
             list
         } else {
             switch droplet.status {
             case .needsToken:
                 message("Add a GitHub token to see the pull requests waiting on you.") {
                     Button("Open settings") { droplet.openSettings() }
-                        .buttonStyle(DroppyAccentButtonStyle(size: .small))
+                        .buttonStyle(pill(.accent(.accentColor)))
                 }
             case .loading where items.isEmpty:
                 message("Loading pull requests…")
             case .failed(let error) where items.isEmpty:
                 message(error) {
                     Button("Try again") { droplet.refresh() }
-                        .buttonStyle(DroppyQuietButtonStyle(size: .small))
+                        .buttonStyle(pill())
                 }
             default:
                 if items.isEmpty {
-                    message("All clear. Nothing is waiting on you.")
+                    message("Nothing is waiting on you.")
                 } else {
                     list
                 }
             }
-        }
-    }
-
-    @ViewBuilder
-    private var list: some View {
-        if context.isPaired {
-            pairedSummary
-        } else {
-            soloList
         }
     }
 
@@ -557,7 +587,7 @@ private struct GithubprsWidget: View {
                 }
                 if items.count > GithubprsDroplet.soloRows {
                     Button("Open the list on GitHub") { droplet.openAllOnGitHub() }
-                        .buttonStyle(DroppyQuietButtonStyle(size: .small))
+                        .buttonStyle(pill(height: layout.metrics.listRowControlSize))
                         .padding(.top, DroppySpacing.xs)
                 }
             }
@@ -733,7 +763,7 @@ private struct GithubprsSettings: View {
                     if droplet.hasToken {
                         DropletControlRow(title: "Token", icon: "key.fill") {
                             Button("Remove") { droplet.removeToken() }
-                                .buttonStyle(DroppyQuietButtonStyle(size: .small))
+                                .buttonStyle(.bordered)
                         }
                     } else {
                         DropletControlRow(title: "Token", icon: "key") {
@@ -744,7 +774,7 @@ private struct GithubprsSettings: View {
                                     .frame(width: 220)
                                     .onSubmit(save)
                                 Button("Save", action: save)
-                                    .buttonStyle(DroppyAccentButtonStyle(size: .small))
+                                    .buttonStyle(.borderedProminent)
                                     .disabled(draft.trimmingCharacters(in: .whitespaces).isEmpty)
                             }
                         }
@@ -777,7 +807,7 @@ private struct GithubprsSettings: View {
                     ForEach(droplet.scopes, id: \.self) { scope in
                         DropletControlRow(title: scope, icon: scope.contains("/") ? "book.closed" : "building.2") {
                             Button("Remove") { droplet.removeScope(scope) }
-                                .buttonStyle(DroppyQuietButtonStyle(size: .small))
+                                .buttonStyle(.bordered)
                         }
                     }
                     DropletControlRow(title: droplet.scopes.isEmpty ? "Add a filter" : "Add another", icon: "plus") {
@@ -789,7 +819,7 @@ private struct GithubprsSettings: View {
                                 .onSubmit(addScope)
                                 .onChange(of: scopeDraft) { _, _ in scopeInvalid = false }
                             Button("Add", action: addScope)
-                                .buttonStyle(DroppyQuietButtonStyle(size: .small))
+                                .buttonStyle(.bordered)
                                 .disabled(scopeDraft.trimmingCharacters(in: .whitespaces).isEmpty)
                         }
                     }
@@ -843,7 +873,7 @@ private struct GithubprsSettings: View {
                         infoTip: "Opens the shelf on this widget, and closes it when it is already showing. Suggested: Control-Option-Command-G."
                     ) {
                         Button("Change…") { droplet.openShortcuts() }
-                            .buttonStyle(DroppyQuietButtonStyle(size: .small))
+                            .buttonStyle(.bordered)
                     }
                 }
             }

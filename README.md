@@ -31,18 +31,6 @@ Install it from the Droppy Store, then open its settings and add a token:
 The token is stored in your Keychain and only ever sent to `api.github.com`.
 You can limit the list to organizations, accounts or `owner/repo` entries.
 
-## Developing
-
-Built with [DroppyKit](https://getdroppy.app/docs/droppykit).
-
-```bash
-droppykit run                    # open it in the harness
-GITHUBPRS_DEMO=1 droppykit run   # same, filled with sample data
-GITHUB_TOKEN=… droppykit run     # same, with your real pull requests
-droppykit build                  # produce .build/Githubprs.droplet
-droppykit validate               # the checks the Store runs
-```
-
 ## License
 
 [MIT](LICENSE)

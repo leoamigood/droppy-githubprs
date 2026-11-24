@@ -12,7 +12,7 @@ let package = Package(
         .library(name: "Githubprs", type: .dynamic, targets: ["Githubprs"])
     ],
     dependencies: [
-        .package(url: "https://gitlab.com/droppyformac1/droppykit.git", from: "1.16.0")
+        .package(url: "https://gitlab.com/droppyformac1/droppykit.git", from: "1.23.0")
     ],
     targets: [
         .target(
